@@ -1,10 +1,7 @@
 #!/usr/bin/env node
 
 import inquirer from 'inquirer'; // prompt user for input
-import gradient from 'gradient-string'; // color the ascii art
-import figlet from 'figlet'; // ascii art
 import {createSpinner} from 'nanospinner'; // loading spinner when waiting
-import {program} from 'commander'; // parse command line arguments
 import dotenv from 'dotenv'; // load environment variables
 import fetch from 'node-fetch'; // make http requests to external APIs
 
@@ -14,57 +11,50 @@ import {promisify} from 'util';
 import {exec} from 'child_process';
 
 dotenv.config();
-const execPrm = promisify(exec);
 
-let user;
-
-const sleep = (ms = 2000) => new Promise((r) => setTimeout(r, ms));
-
-function winner() {
-  console.clear();
-  const msg = `Congrats, ${user} !`;
-  figlet(msg, (err, data) => {
-    console.log(gradient.pastel.multiline(data));
-  });
+function transformOutput(stocksData) {
+  return stocksData.reduce((acc, stockArr) => {
+    const [stock, price] = stockArr;
+    acc[stock] = price;
+    return acc;
+  }, {});
 }
 
-async function handleAnswer(isCorrect) {
-  const spinner = createSpinner('Checking answer...').start();
-  await sleep();
-
-  if (isCorrect) {
-    spinner.success({text: `Nice work ${user}!`});
-    return;
-  }
-  spinner.error({text: `Game over, you lose ${user}`})
-}
-
-async function askName() {
+async function getSymbols() {
   const answers = await inquirer.prompt({
-    name: 'playerName',
+    name: 'symbols',
     type: 'input',
-    message: 'What is your name?',
+    message: 'Choose stock symbols:',
     default() {
-      return 'User';
+      return 'Defaults to none';
     }
   });
-  user = answers.playerName;
-  console.log('Your name is:', user); 
-} 
+  return answers.symbols === 'Defaults to none' ? '' : answers.symbols.toUpperCase();
+}
 
-async function question1() { 
+async function getMode() {
   const answers = await inquirer.prompt({ 
-    name: 'question1',
+    name: 'mode',
     type: 'list', 
-    message: 'How are you today?\n', 
+    message: 'Choose fetch mode:\n',
     choices: [ 
-    'well', 
-    'very good', 
-    'great!', 
-    'not so good' 
-    ] 
-  }); 
-  return handleAnswer(answers.question1 === 'great!');
+      'Offline (cache only)',
+      'Normal (prefer cache)',
+      'Override (no cache)'
+    ]
+  });
+  const modes = {
+    'Normal (prefer cache)': 1,
+    'Override (no cache)': 2,
+    'Offline (cache only)': 3
+  };
+  return modes[answers.mode];
+}
+
+async function getDataFromUser() {
+  const symbols = await getSymbols();
+  const mode = await getMode();
+  return [symbols, mode];
 }
 
 async function appendToCache(stockPrices, overrideFile = false) {
@@ -102,8 +92,7 @@ async function readFromCache() {
   });
 }
 
-async function notInCache(symbols) {
-  const stocksCache = await readFromCache();
+async function notInCache(symbols, stocksCache) {
   const filtered = symbols.split(',').filter(requestedSymbol => {
     let isInCache = false;
     stocksCache.forEach(stock => {
@@ -123,45 +112,40 @@ async function fetchStockData(symbols, mode = 1) {
     NO_CACHE: 2,
     CACHE_ONLY: 3
   };
-  const symbolsNotInCache = mode === modes.NO_CACHE ? symbols : await notInCache(symbols);
-  const cachedStockData = mode === modes.NO_CACHE ? [] : (await readFromCache() ?? []);
-  if (!symbolsNotInCache || mode === modes.CACHE_ONLY) {
-    console.log('Fetched only from cache'); 
-    return cachedStockData;
-  }
+  const cacheSpinner = createSpinner('Retrieving data from cache...').start();
+  try {
+    const cachedStockData = mode === modes.NO_CACHE ? [] : (await readFromCache() ?? []);
+    const symbolsNotInCache = mode === modes.NO_CACHE ? symbols : await notInCache(symbols, cachedStockData);
+    cacheSpinner.success({text: 'Retrieved data from cache successfully'});
+    if (!symbolsNotInCache || mode === modes.CACHE_ONLY) {
+      return cachedStockData;
+    }
 
-  const limit = 10;
-  const url = 'http://api.marketstack.com/v1/eod/latest';
-  const rawRes = await fetch(`${url}?access_key=${process.env.STOCK_API_KEY}&symbols=${symbolsNotInCache}&limit=${limit}`);
-  const res = await rawRes.json();
-  const prices = res.data.map((entry, idx) => [`\r${symbolsNotInCache.split(',')[idx]}: ${entry.close}$\r`]);
-  await appendToCache(prices);
-  return prices.concat(cachedStockData);
+    const limit = 10;
+    const url = 'https://api.marketstack.com/v1/eod/latest';
+    const spinner = createSpinner('Fetching stock data...').start();
+    try {
+      const rawRes = await fetch(`${url}?access_key=${process.env.STOCK_API_KEY}&symbols=${symbolsNotInCache}&limit=${limit}`);
+      const res = await rawRes.json();
+      const prices = res.data.map((entry, idx) => [`\r${symbolsNotInCache.split(',')[idx]}: ${entry.close}$\r`]);
+      await appendToCache(prices);
+      spinner.success({text: 'Fetched stock data successfully'});
+      return prices.concat(cachedStockData);
+    } catch (e) {
+      spinner.error({text: `Fetching stock data failed`})
+    }
+  } catch (err) {
+    cacheSpinner.error({text: `Retrieving data from cache failed`})
+  }
 }
 
 async function main() {
-  program
-    .version('1.0.0', '-v, --version')
-    .usage('[OPTIONS]...')
-    .option('-f, --flag', 'Detects if the flag is present.')
-    .option('-s, --symbols <value>', 'List of stock symbols (TSLA,AAPL)...', [])
-    .parse(process.argv);
-  const options = program.opts();
-  const flag = options.flag ? 'Flag is present.' : 'Flag is not present.';
+  const [symbols, mode] = await getDataFromUser();
+  const prices = await fetchStockData(symbols, mode);
+  console.log(transformOutput(prices));
 
-  // const symbols = options.symbols ? options.symbols.toUpperCase() : [];
-  // const prices = await fetchStockData(symbols, 3);
-  // console.log(prices);
-
-  const {stdout} = await execPrm('ls'); // execute ls command
-  console.log(stdout.split('\n').filter(f => f)); // log the output of the ls previous command
-  //console.log(await execPrm('echo "This is copied text from script" | pbcopy'));
-
-  //await askName();
-  //await question1();
-  //await winner();
-
+  // await promisify(exec)('echo "This is copied text from script" | pbcopy'); // write to clipboard (copy)
+  // (await promisify(exec)('pbpaste'))?.stdout; // read from clipboard (paste)
 }
 
 await main();
-
