@@ -1,15 +1,10 @@
 #!/usr/bin/env node
 
-import inquirer from 'inquirer'; // prompt user for input
-import {createSpinner} from 'nanospinner'; // loading spinner when waiting
-import dotenv from 'dotenv'; // load environment variables
-import fetch from 'node-fetch'; // make http requests to external APIs
-
-// native in Node.js
-import {readFile, writeFile, appendFile, access} from 'fs/promises'; // interact with files
-import {promisify} from 'util';
-import {exec} from 'child_process';
-
+import inquirer from 'inquirer';
+import {createSpinner} from 'nanospinner';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+import {readFile, writeFile, appendFile, access} from 'fs/promises';
 dotenv.config();
 
 function transformOutput(stocksData) {
@@ -26,10 +21,10 @@ async function getSymbols() {
     type: 'input',
     message: 'Choose stock symbols:',
     default() {
-      return 'Defaults to none';
+      return 'TSLA,AAPL,MSFT,GOOGL,AMZN,S&P 500,U';
     }
   });
-  return answers.symbols === 'Defaults to none' ? '' : answers.symbols.toUpperCase();
+  return answers.symbols.toUpperCase();
 }
 
 async function getMode() {
@@ -143,9 +138,6 @@ async function main() {
   const [symbols, mode] = await getDataFromUser();
   const prices = await fetchStockData(symbols, mode);
   console.log(transformOutput(prices));
-
-  // await promisify(exec)('echo "This is copied text from script" | pbcopy'); // write to clipboard (copy)
-  // (await promisify(exec)('pbpaste'))?.stdout; // read from clipboard (paste)
 }
 
 await main();
