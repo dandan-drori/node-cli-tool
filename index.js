@@ -5,7 +5,9 @@ import {createSpinner} from 'nanospinner';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import {readFile, writeFile, appendFile, access} from 'fs/promises';
+import {Logger} from './logger.js';
 dotenv.config();
+const logger = new Logger();
 
 function transformOutput(stocksData) {
   return stocksData.reduce((acc, stockArr) => {
@@ -21,7 +23,7 @@ async function getSymbols() {
     type: 'input',
     message: 'Choose stock symbols:',
     default() {
-      return 'TSLA,AAPL,MSFT,GOOGL,AMZN,S&P 500,U';
+      return 'ZI,TSLA,AAPL,MSFT,GOOGL,AMZN,S&P 500,U';
     }
   });
   return answers.symbols.toUpperCase();
@@ -39,9 +41,9 @@ async function getMode() {
     ]
   });
   const modes = {
-    'Normal (prefer cache)': 1,
-    'Override (no cache)': 2,
-    'Offline (cache only)': 3
+    'Offline (cache only)': 1,
+    'Normal (prefer cache)': 2,
+    'Override (no cache)': 3,
   };
   return modes[answers.mode];
 }
@@ -71,7 +73,7 @@ async function appendToCache(stockPrices, overrideFile = false) {
     const price = priceStr.substring(0, priceStr.length);
     return acc + `${symbol} ${price}\n`;
   }, ``);
-  console.log('appending to file');
+  logger.info(`stocks appended to file: ${stocks}`)
   const appendOrWrite = overrideFile ? writeFile : appendFile;
   await appendOrWrite(`./${process.env.CACHE_STOCK_FILE_PATH}`, stocks);
 }
@@ -103,9 +105,9 @@ async function notInCache(symbols, stocksCache) {
 
 async function fetchStockData(symbols, mode = 1) {
   const modes = {
-    NORMAL: 1,
+    CACHE_ONLY: 1,
+    NORMAL: 2,
     NO_CACHE: 2,
-    CACHE_ONLY: 3
   };
   const cacheSpinner = createSpinner('Retrieving data from cache...').start();
   try {
@@ -117,7 +119,8 @@ async function fetchStockData(symbols, mode = 1) {
     }
 
     const limit = 10;
-    const url = 'https://api.marketstack.com/v1/eod/latest';
+    // https is not supported for current plan
+    const url = 'http://api.marketstack.com/v1/eod/latest';
     const spinner = createSpinner('Fetching stock data...').start();
     try {
       const rawRes = await fetch(`${url}?access_key=${process.env.STOCK_API_KEY}&symbols=${symbolsNotInCache}&limit=${limit}`);
@@ -127,17 +130,59 @@ async function fetchStockData(symbols, mode = 1) {
       spinner.success({text: 'Fetched stock data successfully'});
       return prices.concat(cachedStockData);
     } catch (e) {
-      spinner.error({text: `Fetching stock data failed`})
+      logger.error(`Failed to fetch stock data (fetchStockData), ${e}`);
+      spinner.error({text: `Fetching stock data failed`});
+      return [];
     }
   } catch (err) {
-    cacheSpinner.error({text: `Retrieving data from cache failed`})
+    logger.error(`Failed to retrieve data from cache (fetchStockData), ${err}`);
+    cacheSpinner.error({text: `Retrieving data from cache failed`});
+    return [];
+  }
+}
+
+async function fetchStockDataV2(symbol, mode = 1) {
+  const modes = {
+    CACHE_ONLY: 1,
+    NORMAL: 2,
+    NO_CACHE: 3,
+  };
+  const cacheSpinner = createSpinner('Retrieving data from cache...').start();
+  try {
+    const cachedStockData = mode === modes.NO_CACHE ? [] : (await readFromCache() ?? []);
+    const symbolNotInCache = mode === modes.NO_CACHE ? symbol : await notInCache(symbol, cachedStockData);
+    cacheSpinner.success({text: 'Retrieved data from cache successfully'});
+    if (!symbolNotInCache || mode === modes.CACHE_ONLY) {
+      return cachedStockData;
+    }
+
+    const url = 'https://finnhub.io/api/v1/quote';
+    const spinner = createSpinner('Fetching stock data...').start();
+    try {
+      const rawRes = await fetch(`${url}?symbol=${symbolNotInCache}&token=${process.env.STOCK_V2_API_KEY}`);
+      const res = await rawRes.json();
+      const price = res?.c;
+      const stockData = [[`\r${symbolNotInCache}: ${price}$`]];
+      await appendToCache(stockData);
+      spinner.success({text: 'Fetched stock data successfully'});
+      return stockData;
+    } catch (e) {
+      logger.error(`Failed to fetch stock data (fetchStockDataV2), ${e}`);
+      spinner.error({text: `Fetching stock data failed`});
+      return [];
+    }
+  } catch (err) {
+    logger.error(`Failed to retrieve data from cache (fetchStockDataV2), ${err}`);
+    cacheSpinner.error({text: `Retrieving data from cache failed`});
+    return [];
   }
 }
 
 async function main() {
-  const [symbols, mode] = await getDataFromUser();
-  const prices = await fetchStockData(symbols, mode);
-  console.log(transformOutput(prices));
+  // const [symbols, mode] = await getDataFromUser();
+  // const prices = await fetchStockDataV2(symbols, mode);
+  // console.log(transformOutput(prices));
+  logger.info('info');
 }
 
 await main();

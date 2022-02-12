@@ -1,6 +1,7 @@
 node_modules
 .env
 .npmrc
+.idea
 *.csv
 *.numbers
-.idea
+*.txt
