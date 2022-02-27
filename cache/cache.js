@@ -1,6 +1,6 @@
 import {access, appendFile, readFile, writeFile} from "fs/promises";
 import dotenv from 'dotenv';
-import {Logger} from '../logger.js';
+import {Logger} from '../utils/logger.js';
 dotenv.config();
 const logger = new Logger();
 

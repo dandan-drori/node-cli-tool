@@ -2,7 +2,7 @@ import {createSpinner} from "nanospinner";
 import fetch from "node-fetch";
 import {Modes} from "../models/model.js";
 import dotenv from 'dotenv';
-import {Logger} from '../logger.js';
+import {Logger} from '../utils/logger.js';
 import {appendToCache, notInCache, readFromCache} from "../cache/cache.js";
 dotenv.config();
 const logger = new Logger();
